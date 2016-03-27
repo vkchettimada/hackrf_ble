@@ -1,0 +1,13 @@
+HackRF One BLE.
+
+Compile:
+  $ gcc -o src/hackrf_rx src/hackrf_rx.c -I/usr/include/libhackrf -lhackrf
+
+Run:
+  $ ./src/hackrf_rx
+
+References:
+- http://greatscottgadgets.com/hackrf/
+- https://github.com/mossmann/hackrf/wiki
+- https://github.com/omriiluz/NRF24-BTLE-Decoder
+- https://github.com/JiaoXianjun/BTLE
