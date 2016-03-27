@@ -147,10 +147,13 @@ static uint32_t ble_crc(uint32_t crc_init, uint8_t *p_data, uint16_t data_len)
 
 static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 {
+  #define SPS (2) /* Samples per symbol */
+  static uint32_t s_elapsed_us = 0;
   uint32_t access_address = 0x8E89BED6;
   int retcode;
-  int8_t *p_sample_pdu;
+  int8_t *p_sample_pdu, *p_sample_pdu_prev, *p_sample_pdu_end;
   uint32_t sample_pdu_size;
+  uint32_t elapsed_block_us;
   uint8_t p_pdu[258];
 
   #if DEBUG
@@ -159,16 +162,30 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
     , p_transfer->valid_length);
   #endif
 
+  elapsed_block_us = s_elapsed_us;
+
+  p_sample_pdu = p_transfer->buffer;
+  sample_pdu_size = p_transfer->valid_length;
+  p_sample_pdu_prev = p_sample_pdu;
+  p_sample_pdu_end = p_sample_pdu;
+
   /** @todo instead of size, take head-tail-rb_size */
-  retcode = gfsk_demod(4, p_transfer->buffer, p_transfer->valid_length
-                      , 1, (uint8_t *) &access_address, sizeof(access_address) * 8
-                      , &p_sample_pdu, &sample_pdu_size);
+  while (0 == (retcode = gfsk_demod(SPS, p_sample_pdu_prev, sample_pdu_size
+                    , 1, (uint8_t *) &access_address, sizeof(access_address) * 8
+                    , &p_sample_pdu, &sample_pdu_size)))
 
-  if (0 == retcode)
   {
-    printf("Found.");
+    uint32_t delta_us, delta_end_start_us;
 
-    retcode = gfsk_demod(4, p_sample_pdu, sample_pdu_size
+    delta_us = (p_sample_pdu - p_sample_pdu_prev) / (2 * SPS);
+    elapsed_block_us += delta_us;
+
+    delta_end_start_us = (p_sample_pdu - p_sample_pdu_end) / (2 * SPS);
+    printf("%010dus %010dus %010dus", elapsed_block_us, delta_us, delta_end_start_us);
+
+    p_sample_pdu_prev = p_sample_pdu;
+
+    retcode = gfsk_demod(SPS, p_sample_pdu, sample_pdu_size
                         , 0, p_pdu, 16
                         , &p_sample_pdu, &sample_pdu_size);
 
@@ -182,9 +199,9 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
       p_pdu[1] = whiten(&lfsr, p_pdu[1]);
       len = p_pdu[1] & 0x3F;
 
-      printf(" Header: 0x%02X 0x%02X, len: %d.", p_pdu[0], p_pdu[1], len);
+      printf(" Header: %02X %02X, len: %02d.", p_pdu[0], p_pdu[1], len);
 
-      retcode = gfsk_demod(4, p_sample_pdu, sample_pdu_size
+      retcode = gfsk_demod(SPS, p_sample_pdu, sample_pdu_size
                           , 0, &p_pdu[2], (len + 3) * 8
                           , &p_sample_pdu, &sample_pdu_size);
 
@@ -195,6 +212,8 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
         uint32_t crc;
         uint32_t crc_pdu;
 
+        p_sample_pdu_end = p_sample_pdu;
+
         printf(" Payload:");
         p_payload = &p_pdu[2];
         l = len + 3;
@@ -202,7 +221,7 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
         {
           *p_payload = whiten(&lfsr, *p_payload);
 
-          printf(" 0x%02X", *p_payload);
+          printf(" %02X", *p_payload);
 
           p_payload++;
         }
@@ -210,12 +229,14 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
         crc_pdu = (p_pdu[len + 2 + 2] << 16) | (p_pdu[len + 2 + 1] << 8) | p_pdu[len + 2];
 
         crc = ble_crc(0xAAAAAA, p_pdu, len + 2);
-        printf(" CRC: 0x%06X. %s", crc, (crc == crc_pdu) ? "OK.": "");
+        printf(" CRC: %06X. %s", crc, (crc == crc_pdu) ? "OK.": "");
       }
     }
 
     putchar('\n');
   }
+
+  s_elapsed_us += p_transfer->valid_length / (2 * SPS);
 
   return(0);
 }
@@ -253,7 +274,7 @@ int main(int argc, char **argv)
     goto exit_close;
   }
 
-  sps = 4000000ul;
+  sps = 2000000ul;
   retcode = hackrf_set_sample_rate(p_device, sps);
   if (retcode)
   {
@@ -261,7 +282,7 @@ int main(int argc, char **argv)
     goto exit_close;
   }
 
-  bandwidth = 2000000ul;
+  bandwidth = 1000000ul;
   retcode = hackrf_set_baseband_filter_bandwidth(p_device, bandwidth);
   if (retcode)
   {
