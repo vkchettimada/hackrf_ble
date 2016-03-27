@@ -32,23 +32,35 @@ static void bit_set(uint8_t *p_bytes, uint8_t bit_index, uint8_t bit_value)
   }
 }
 
-static uint32_t rb_write(uint8_t *p_dst, uint32_t dst_size, uint32_t head, uint32_t *p_tail
-                        , uint8_t *p_src, uint32_t src_size)
+static uint32_t rb_free_get(uint32_t size, uint32_t head, uint32_t tail, uint32_t *p_free0)
 {
   uint32_t free0, free1;
 
-  if (*p_tail > head)
+  if (tail >= head)
   {
-    free0 = dst_size - *p_tail;
+    free0 = size - tail;
     free1 = head;
   }
   else
   {
-    free0 = head - *p_tail;
+    free0 = head - tail;
     free1 = 0;
   }
 
-  if (src_size > (free0 + free1 - 1))
+  if (p_free0)
+  {
+    *p_free0 = free0;
+  }
+
+  return(free0 + free1 - 1);
+}
+
+static uint32_t rb_write(uint8_t *p_dst, uint32_t dst_size, uint32_t head, uint32_t *p_tail
+                        , uint8_t *p_src, uint32_t src_size)
+{
+  uint32_t free0;
+
+  if (src_size > rb_free_get(dst_size, head, *p_tail, &free0))
   {
     return(0);
   }
@@ -71,23 +83,35 @@ static uint32_t rb_write(uint8_t *p_dst, uint32_t dst_size, uint32_t head, uint3
   return(src_size);
 }
 
-static uint32_t rb_read(uint8_t *p_dst, uint32_t dst_size
-                        , uint8_t *p_src, uint32_t src_size, uint32_t *p_head, uint32_t tail)
+static uint32_t rb_avail_get(uint32_t size, uint32_t head, uint32_t tail, uint32_t *p_avail0)
 {
   uint32_t avail0, avail1;
 
-  if (tail > *p_head)
+  if (tail >= head)
   {
-    avail0 = tail - *p_head;
+    avail0 = tail - head;
     avail1 = 0;
   }
   else
   {
-    avail0 = src_size - *p_head;
+    avail0 = size - head;
     avail1 = tail;
   }
 
-  if (dst_size > (avail0 + avail1))
+  if (p_avail0)
+  {
+    *p_avail0 = avail0;
+  }
+
+  return(avail0 + avail1);
+}
+
+static uint32_t rb_read(uint8_t *p_dst, uint32_t dst_size
+                        , uint8_t *p_src, uint32_t src_size, uint32_t *p_head, uint32_t tail)
+{
+  uint32_t avail0;
+
+  if (dst_size > rb_avail_get(src_size, *p_head, tail, &avail0))
   {
     return(0);
   }
@@ -227,24 +251,54 @@ static uint32_t ble_crc(uint32_t crc_init, uint8_t *p_data, uint16_t data_len)
 static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 {
   #define SPS (2) /* Samples per symbol */
+  #define RB_SIZE (256 * 1024 + 1)
+  static uint8_t rb[RB_SIZE];
+  static uint32_t rb_head = 0, rb_tail = 0;
   static uint32_t s_elapsed_us = 0;
   uint32_t access_address = 0x8E89BED6;
   int retcode;
+  uint8_t buffer[2 * RB_SIZE];
+  uint32_t buffer_length;
   int8_t *p_sample_pdu, *p_sample_pdu_prev, *p_sample_pdu_end;
   uint32_t sample_pdu_size;
   uint32_t elapsed_block_us;
   uint8_t p_pdu[258];
 
+  #define DEBUG (1)
   #if DEBUG
-  printf("buffer_length: %d, valid_length: %d\n"
+  printf("buffer_length: (%d, %d)"
     , p_transfer->buffer_length
     , p_transfer->valid_length);
   #endif
 
+  if (p_transfer->valid_length > rb_free_get(RB_SIZE, rb_head, rb_tail, 0))
+  {
+    do_exit = 1;
+
+    return(0);
+  }
+
+  #if DEBUG
+  printf(", write: (%d, %d)", rb_head, rb_tail);
+  #endif
+
+  (void) rb_write(rb, RB_SIZE, rb_head, &rb_tail, p_transfer->buffer, p_transfer->valid_length);
+
+  #if DEBUG
+  printf(", read: (%d, %d)", rb_head, rb_tail);
+  #endif
+
+  buffer_length = rb_avail_get(RB_SIZE, rb_head, rb_tail, 0);
+  (void) rb_read(buffer, buffer_length, rb, RB_SIZE, &rb_head, rb_tail);
+
+  #if DEBUG
+  printf(", read: (%d, %d)\n", rb_head, rb_tail);
+  #endif
+
   elapsed_block_us = s_elapsed_us;
 
-  p_sample_pdu = p_transfer->buffer;
-  sample_pdu_size = p_transfer->valid_length;
+  p_sample_pdu = buffer;
+  sample_pdu_size = buffer_length;
   p_sample_pdu_prev = p_sample_pdu;
   p_sample_pdu_end = p_sample_pdu;
 
