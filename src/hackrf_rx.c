@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <signal.h>
 #include <unistd.h>
 
@@ -29,6 +30,84 @@ static void bit_set(uint8_t *p_bytes, uint8_t bit_index, uint8_t bit_value)
   {
     p_bytes[bit_index >> 3] &= ~(1 << (bit_index & 0x07));
   }
+}
+
+static uint32_t rb_write(uint8_t *p_dst, uint32_t dst_size, uint32_t head, uint32_t *p_tail
+                        , uint8_t *p_src, uint32_t src_size)
+{
+  uint32_t free0, free1;
+
+  if (*p_tail > head)
+  {
+    free0 = dst_size - *p_tail;
+    free1 = head;
+  }
+  else
+  {
+    free0 = head - *p_tail;
+    free1 = 0;
+  }
+
+  if (src_size > (free0 + free1 - 1))
+  {
+    return(0);
+  }
+
+  if (src_size > free0)
+  {
+    uint8_t tail;
+
+    memcpy(p_dst + *p_tail, p_src, free0);
+    tail = src_size - free0; 
+    memcpy(p_dst, p_src + free0, tail);
+    *p_tail = tail;
+  }
+  else
+  {
+    memcpy(p_dst + *p_tail, p_src, src_size);
+    *p_tail += src_size;
+  }
+
+  return(src_size);
+}
+
+static uint32_t rb_read(uint8_t *p_dst, uint32_t dst_size
+                        , uint8_t *p_src, uint32_t src_size, uint32_t *p_head, uint32_t tail)
+{
+  uint32_t avail0, avail1;
+
+  if (tail > *p_head)
+  {
+    avail0 = tail - *p_head;
+    avail1 = 0;
+  }
+  else
+  {
+    avail0 = src_size - *p_head;
+    avail1 = tail;
+  }
+
+  if (dst_size > (avail0 + avail1))
+  {
+    return(0);
+  }
+
+  if (dst_size > avail0)
+  {
+    uint32_t head;
+
+    memcpy(p_dst, p_src + *p_head, avail0);
+    head = dst_size - avail0;
+    memcpy(p_dst + avail0, p_src, head);
+    *p_head = head;
+  }
+  else
+  {
+    memcpy(p_dst, p_src + *p_head, dst_size);
+    *p_head += dst_size;
+  }
+
+  return(dst_size);
 }
 
 static int gfsk_demod(uint8_t sps, int8_t *p_sample, uint32_t size
