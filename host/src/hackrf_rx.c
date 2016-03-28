@@ -70,7 +70,7 @@ static uint32_t rb_write(uint8_t *p_dst, uint32_t dst_size, uint32_t head, uint3
     uint8_t tail;
 
     memcpy(p_dst + *p_tail, p_src, free0);
-    tail = src_size - free0; 
+    tail = src_size - free0;
     memcpy(p_dst, p_src + free0, tail);
     *p_tail = tail;
   }
