@@ -120,14 +120,23 @@ static uint32_t rb_read(uint8_t *p_dst, uint32_t dst_size
   {
     uint32_t head;
 
-    memcpy(p_dst, p_src + *p_head, avail0);
     head = dst_size - avail0;
-    memcpy(p_dst + avail0, p_src, head);
+
+    if (p_dst)
+    {
+      memcpy(p_dst, p_src + *p_head, avail0);
+      memcpy(p_dst + avail0, p_src, head);
+    }
+
     *p_head = head;
   }
   else
   {
-    memcpy(p_dst, p_src + *p_head, dst_size);
+    if (p_dst)
+    {
+      memcpy(p_dst, p_src + *p_head, dst_size);
+    }
+
     *p_head += dst_size;
   }
 
@@ -251,20 +260,22 @@ static uint32_t ble_crc(uint32_t crc_init, uint8_t *p_data, uint16_t data_len)
 static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 {
   #define SPS (2) /* Samples per symbol */
-  #define RB_SIZE (256 * 1024 + 1)
+  #define RB_SIZE ((262144) + (265 * 8 * 2 * SPS) + 1) /* HackRF buffer length + max sample for air interface of 265 bytes + 1 byte ring buffer roll-over */
   static uint8_t rb[RB_SIZE];
   static uint32_t rb_head = 0, rb_tail = 0;
   static uint32_t s_elapsed_us = 0;
+  static uint32_t s_elapsed_match_us = 0;
+  static uint32_t s_elapsed_end_us = 0;
   uint32_t access_address = 0x8E89BED6;
   int retcode;
-  uint8_t buffer[2 * RB_SIZE];
+  uint32_t rb_head_tmp;
+  int8_t buffer[RB_SIZE - 1];
   uint32_t buffer_length;
   int8_t *p_sample_pdu, *p_sample_pdu_prev, *p_sample_pdu_end;
   uint32_t sample_pdu_size;
-  uint32_t elapsed_block_us;
   uint8_t p_pdu[258];
 
-  #define DEBUG (1)
+  //#define DEBUG (1)
   #if DEBUG
   printf("buffer_length: (%d, %d)"
     , p_transfer->buffer_length
@@ -289,13 +300,12 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
   #endif
 
   buffer_length = rb_avail_get(RB_SIZE, rb_head, rb_tail, 0);
-  (void) rb_read(buffer, buffer_length, rb, RB_SIZE, &rb_head, rb_tail);
+  rb_head_tmp = rb_head;
+  (void) rb_read(buffer, buffer_length, rb, RB_SIZE, &rb_head_tmp, rb_tail);
 
   #if DEBUG
   printf(", read: (%d, %d)\n", rb_head, rb_tail);
   #endif
-
-  elapsed_block_us = s_elapsed_us;
 
   p_sample_pdu = buffer;
   sample_pdu_size = buffer_length;
@@ -303,21 +313,29 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
   p_sample_pdu_end = p_sample_pdu;
 
   /** @todo instead of size, take head-tail-rb_size */
-  while (0 == (retcode = gfsk_demod(SPS, p_sample_pdu_prev, sample_pdu_size
+  while (0 == (retcode = gfsk_demod(SPS, p_sample_pdu, sample_pdu_size
                     , 1, (uint8_t *) &access_address, sizeof(access_address) * 8
                     , &p_sample_pdu, &sample_pdu_size)))
 
   {
-    uint32_t delta_us, delta_end_start_us;
+    uint32_t elapsed_us, delta_us, delta_end_start_us;
 
-    delta_us = (p_sample_pdu - p_sample_pdu_prev) / (2 * SPS);
-    elapsed_block_us += delta_us;
+    /* calc elapsed time */
+    elapsed_us = s_elapsed_us + ((p_sample_pdu - buffer) / (2 * SPS));
 
-    delta_end_start_us = (p_sample_pdu - p_sample_pdu_end) / (2 * SPS);
-    printf("%010dus %010dus %010dus", elapsed_block_us, delta_us, delta_end_start_us);
+    /* calc delta from previous address match */
+    delta_us = s_elapsed_match_us + ((p_sample_pdu - p_sample_pdu_prev) / (2 * SPS));
+    s_elapsed_match_us = 0;
 
+    /* calc delta from previous pdu end */
+    delta_end_start_us = s_elapsed_end_us + ((p_sample_pdu - p_sample_pdu_end) / (2 * SPS));
+    s_elapsed_end_us = 0;
+    printf("%010dus %010dus %010dus", elapsed_us, delta_us, delta_end_start_us);
+
+    /* remember current address as previous value for next iteration */
     p_sample_pdu_prev = p_sample_pdu;
 
+    /* decode the address matched PDU */
     retcode = gfsk_demod(SPS, p_sample_pdu, sample_pdu_size
                         , 0, p_pdu, 16
                         , &p_sample_pdu, &sample_pdu_size);
@@ -367,9 +385,20 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
     }
 
     putchar('\n');
+
+    if (0 != retcode)
+    {
+      p_sample_pdu = p_sample_pdu_prev - (sizeof(access_address) * 8 * 2 * SPS);
+
+      break;
+    }
   }
 
-  s_elapsed_us += p_transfer->valid_length / (2 * SPS);
+  (void) rb_read(0, (p_sample_pdu - buffer), rb, RB_SIZE, &rb_head, rb_tail);
+
+  s_elapsed_us += (p_sample_pdu - buffer) / (2 * SPS);
+  s_elapsed_match_us += (p_sample_pdu - p_sample_pdu_prev) / (2 * SPS);
+  s_elapsed_end_us += (p_sample_pdu - p_sample_pdu_end) / (2 * SPS);
 
   return(0);
 }
