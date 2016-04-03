@@ -6,7 +6,7 @@
 
 #include <hackrf.h>
 
-static uint8_t do_exit = 0;
+static volatile uint8_t do_exit = 0;
 
 static void sfn_signal_callback(int signum)
 {
@@ -257,9 +257,11 @@ static uint32_t ble_crc(uint32_t crc_init, uint8_t *p_data, uint16_t data_len)
   return state;
 }
 
+static volatile uint8_t gs_mode = 0;
+
 static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 {
-  #define SPS (2) /* Samples per symbol */
+  #define SPS (4) /* Samples per symbol */
   #define RB_SIZE ((262144) + (265 * 8 * 2 * SPS) + 1) /* HackRF buffer length + max sample for air interface of 265 bytes + 1 byte ring buffer roll-over */
   static uint8_t rb[RB_SIZE];
   static uint32_t rb_head = 0, rb_tail = 0;
@@ -275,12 +277,22 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
   uint32_t sample_pdu_size;
   uint8_t p_pdu[258];
 
-  //#define DEBUG (1)
   #if DEBUG
   printf("buffer_length: (%d, %d)"
     , p_transfer->buffer_length
     , p_transfer->valid_length);
   #endif
+
+  if (gs_mode == 1)
+  {
+    memset(p_transfer->buffer, 0, p_transfer->valid_length);
+
+    #if DEBUG
+    putchar('\n');
+    #endif
+
+    return(0);
+  }
 
   if (p_transfer->valid_length > rb_free_get(RB_SIZE, rb_head, rb_tail, 0))
   {
@@ -436,7 +448,7 @@ int main(int argc, char **argv)
     goto exit_close;
   }
 
-  sps = 2000000ul;
+  sps = 4000000ul;
   retcode = hackrf_set_sample_rate(p_device, sps);
   if (retcode)
   {
@@ -444,7 +456,8 @@ int main(int argc, char **argv)
     goto exit_close;
   }
 
-  bandwidth = 1000000ul;
+  #if (0 == DEBUG_RX_DISABLED)
+  bandwidth = 2000000ul;
   retcode = hackrf_set_baseband_filter_bandwidth(p_device, bandwidth);
   if (retcode)
   {
@@ -459,6 +472,7 @@ int main(int argc, char **argv)
     goto exit_close;
   }
 
+  do_exit = 0;
   while(!do_exit) {
     sleep(1);
     // putchar('.');
@@ -469,6 +483,33 @@ int main(int argc, char **argv)
   if (retcode)
   {
     printf("hackrf_stop_rx: %d.\n", retcode);
+    goto exit_close;
+  }
+
+  while (hackrf_is_streaming(p_device) == HACKRF_TRUE);
+  #endif
+
+  gs_mode = 1;
+
+  retcode = hackrf_start_tx(p_device, sfn_hackrf_sample_block_cb, NULL);
+  if (retcode)
+  {
+    printf("hackrf_start_tx: %d.\n", retcode);
+    goto exit_close;
+  }
+
+  do_exit = 0;
+  while(!do_exit) {
+    sleep(1);
+    putchar('.');
+  }
+  putchar('\n');
+
+  retcode = hackrf_stop_tx(p_device);
+  if (retcode)
+  {
+    printf("hackrf_stop_tx: %d.\n", retcode);
+    goto exit_close;
   }
 
 exit_close:
