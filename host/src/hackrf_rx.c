@@ -258,6 +258,8 @@ static uint32_t ble_crc(uint32_t crc_init, uint8_t *p_data, uint16_t data_len)
 }
 
 static volatile uint8_t gs_mode = 0;
+static int8_t gs_buffer_tx[262144];
+static uint32_t gs_buffer_tx_length = 0;
 
 static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 {
@@ -285,7 +287,20 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 
   if (gs_mode == 1)
   {
-    memset(p_transfer->buffer, 0, p_transfer->valid_length);
+    #define PRE_PACKET_ZERO_LEN (256)
+    if ((PRE_PACKET_ZERO_LEN + gs_buffer_tx_length) > p_transfer->valid_length)
+    {
+      gs_buffer_tx_length = 0;
+
+      do_exit = 1;
+
+      return(1);
+    }
+
+    memset(p_transfer->buffer, 0, PRE_PACKET_ZERO_LEN);
+    memcpy(p_transfer->buffer + PRE_PACKET_ZERO_LEN, &gs_buffer_tx[0], gs_buffer_tx_length);
+    memset(p_transfer->buffer + PRE_PACKET_ZERO_LEN + gs_buffer_tx_length, 0, p_transfer->valid_length - PRE_PACKET_ZERO_LEN - gs_buffer_tx_length);
+    #undef PRE_PACKET_ZERO_LEN
 
     #if DEBUG
     putchar('\n');
@@ -393,6 +408,13 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 
         crc = ble_crc(0xAAAAAA, p_pdu, len + 2);
         printf(" CRC: %06X. %s", crc, (crc == crc_pdu) ? "OK.": "");
+
+        /* copy this packet for transmission */
+        if (crc == crc_pdu)
+        {
+          gs_buffer_tx_length = (1 + sizeof(access_address) + 2 + len + 3) * 8 * 2 * SPS;
+          memcpy(gs_buffer_tx, (p_sample_pdu_prev - ((1 + sizeof(access_address)) * 8 * 2 * SPS)), gs_buffer_tx_length);
+        }
       }
     }
 
@@ -400,7 +422,7 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 
     if (0 != retcode)
     {
-      p_sample_pdu = p_sample_pdu_prev - (sizeof(access_address) * 8 * 2 * SPS);
+      p_sample_pdu = p_sample_pdu_prev - ((1 + sizeof(access_address)) * 8 * 2 * SPS);
 
       break;
     }
@@ -501,7 +523,7 @@ int main(int argc, char **argv)
   do_exit = 0;
   while(!do_exit) {
     sleep(1);
-    putchar('.');
+    //putchar('.');
   }
   putchar('\n');
 
