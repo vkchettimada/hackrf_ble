@@ -15,12 +15,12 @@ static void sfn_signal_callback(int signum)
   do_exit = 1;
 }
 
-static uint8_t bit_get(uint8_t *p_bytes, uint8_t bit_index)
+static uint8_t bit_get(uint8_t *p_bytes, uint32_t bit_index)
 {
   return ((p_bytes[bit_index>>3] >> (bit_index & 0x07)) & 0x01);
 }
 
-static void bit_set(uint8_t *p_bytes, uint8_t bit_index, uint8_t bit_value)
+static void bit_set(uint8_t *p_bytes, uint32_t bit_index, uint8_t bit_value)
 {
   if (bit_value)
   {
@@ -270,7 +270,7 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
   static uint32_t s_elapsed_us = 0;
   static uint32_t s_elapsed_match_us = 0;
   static uint32_t s_elapsed_end_us = 0;
-  uint32_t access_address = 0x8E89BED6;
+  uint8_t match_address[] = {0xAA, 0xD6, 0xBE, 0x89, 0x8E}; /* Preamble = 0x55, Access address = 0x8E89BED6 */
   int retcode;
   uint32_t rb_head_tmp;
   int8_t buffer[RB_SIZE - 1];
@@ -341,7 +341,7 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 
   /** @todo instead of size, take head-tail-rb_size */
   while (0 == (retcode = gfsk_demod(SPS, p_sample_pdu, sample_pdu_size
-                    , 1, (uint8_t *) &access_address, sizeof(access_address) * 8
+                    , 1, (uint8_t *) &match_address[0], sizeof(match_address) * 8
                     , &p_sample_pdu, &sample_pdu_size)))
 
   {
@@ -412,8 +412,8 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
         /* copy this packet for transmission */
         if (crc == crc_pdu)
         {
-          gs_buffer_tx_length = (1 + sizeof(access_address) + 2 + len + 3) * 8 * 2 * SPS;
-          memcpy(gs_buffer_tx, (p_sample_pdu_prev - ((1 + sizeof(access_address)) * 8 * 2 * SPS)), gs_buffer_tx_length);
+          gs_buffer_tx_length = (sizeof(match_address) + 2 + len + 3) * 8 * 2 * SPS;
+          memcpy(gs_buffer_tx, (p_sample_pdu_prev - ((sizeof(match_address)) * 8 * 2 * SPS)), gs_buffer_tx_length);
         }
       }
     }
@@ -422,7 +422,7 @@ static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 
     if (0 != retcode)
     {
-      p_sample_pdu = p_sample_pdu_prev - ((1 + sizeof(access_address)) * 8 * 2 * SPS);
+      p_sample_pdu = p_sample_pdu_prev - (sizeof(match_address) * 8 * 2 * SPS);
 
       break;
     }
