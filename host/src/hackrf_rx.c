@@ -462,6 +462,27 @@ int main(int argc, char **argv)
     goto exit_exit;
   }
 
+  retcode = hackrf_set_lna_gain(p_device, 40);
+  if (retcode)
+  {
+    printf("hackrf_set_lna_gain: %d.\n", retcode);
+    goto exit_close;
+  }
+
+  retcode = hackrf_set_vga_gain(p_device, 24);
+  if (retcode)
+  {
+    printf("hackrf_set_vga_gain: %d.\n", retcode);
+    goto exit_close;
+  }
+
+  retcode = hackrf_set_txvga_gain(p_device, 47);
+  if (retcode)
+  {
+    printf("hackrf_set_txvga_gain: %d.\n", retcode);
+    goto exit_close;
+  }
+
   freq = 2402000000ul;
   retcode = hackrf_set_freq(p_device, freq);
   if (retcode)
