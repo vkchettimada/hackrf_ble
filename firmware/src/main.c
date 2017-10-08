@@ -16,40 +16,45 @@ typedef struct gpio_port_t {
 	volatile uint32_t not;		/* +0x300 */
 } gpio_port_t;
 
-#define GPIO_PORT(n) ((gpio_port_t *) (0x400f4000 + 0x2000 + (n) * 4))
+#define GPIO_PORT(n) ((gpio_port_t *)(0x400f4000 + 0x2000 + (n) * 4))
 
 void main(void)
 {
-  gpio_port_t *p_gpio_port;
-  int i;
+	gpio_port_t *p_gpio_port;
+	int i;
 
-  /* Init all GPIOs as inputs */
-  for(i = 0; i < 8; i++)
-  {
-    p_gpio_port = GPIO_PORT(i);
-    p_gpio_port->dir = 0;
-  }
+	/* Init all GPIOs as inputs */
+	for (i = 0; i < 8; i++) {
+		p_gpio_port = GPIO_PORT(i);
+		p_gpio_port->dir = 0;
+	}
 
-  /* GPIO port 2 pin 1 as output */
-  p_gpio_port = GPIO_PORT(2);
-  p_gpio_port->dir |= (1 << 1);
-  p_gpio_port->dir |= (1 << 2);
-  p_gpio_port->dir |= (1 << 8);
+	/* GPIO port 2 pin 1, 2 and 8 as output */
+	p_gpio_port = GPIO_PORT(2);
+	p_gpio_port->dir |= (1 << 1);
+	p_gpio_port->dir |= (1 << 2);
+	p_gpio_port->dir |= (1 << 8);
 
-  while(1){
-		for (i = 0; i < 2000000; i++)	/* Wait a bit. */
+	while(1) {
+		/* Wait a bit... */
+		for (i = 0; i < 2000000; i++) {
 			__asm__("nop");
+		}
 
-    p_gpio_port->not |= (1 << 1);
+		p_gpio_port->not |= (1 << 1);
 
-		for (i = 0; i < 2000000; i++)	/* Wait a bit. */
+		/* Wait a bit... */
+		for (i = 0; i < 2000000; i++) {
 			__asm__("nop");
+		}
 
-    p_gpio_port->not |= (1 << 2);
+		p_gpio_port->not |= (1 << 2);
 
-		for (i = 0; i < 2000000; i++)	/* Wait a bit. */
+		/* Wait a bit... */
+		for (i = 0; i < 2000000; i++) {
 			__asm__("nop");
+		}
 
-    p_gpio_port->not |= (1 << 8);
-  }
+		p_gpio_port->not |= (1 << 8);
+	}
 }
