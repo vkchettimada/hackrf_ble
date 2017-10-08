@@ -168,11 +168,10 @@ static int gfsk_demod(uint8_t sps, int8_t *p_sample, uint32_t size
       int I1, Q1;
       uint8_t bit_value;
 
-      I1 = *p_sample++;
-      Q1 = *p_sample++;
+      I1 = *(p_sample + (2 * sps) - 2 + 0);
+      Q1 = *(p_sample + (2 * sps) - 2 + 1);
 
       bit_value = (( (I0 * Q1) - (I1 * Q0) ) > 0 ) ? 1 : 0;
-      //printf("%d", bit_value);
       if (!match || bit_get(p_bytes, bit_index) == bit_value)
       {
         if (!match)
@@ -180,7 +179,7 @@ static int gfsk_demod(uint8_t sps, int8_t *p_sample, uint32_t size
           bit_set(p_bytes, bit_index, bit_value);
         }
 
-        p_sample += ((2 * sps) - 4);
+        p_sample += ((2 * sps) - 2);
         size -= ((2 * sps) - 2);
 
         if ((++bit_index) == bit_count)
@@ -263,7 +262,7 @@ static uint32_t gs_buffer_tx_length = 0;
 
 static int sfn_hackrf_sample_block_cb(hackrf_transfer *p_transfer)
 {
-  #define SPS (4) /* Samples per symbol */
+  #define SPS (8) /* Samples per symbol */
   #define RB_SIZE ((262144) + (265 * 8 * 2 * SPS) + 1) /* HackRF buffer length + max sample for air interface of 265 bytes + 1 byte ring buffer roll-over */
   static uint8_t rb[RB_SIZE];
   static uint32_t rb_head = 0, rb_tail = 0;
@@ -491,7 +490,7 @@ int main(int argc, char **argv)
     goto exit_close;
   }
 
-  sps = 4000000ul;
+  sps = SPS * 1000000ul;
   retcode = hackrf_set_sample_rate(p_device, sps);
   if (retcode)
   {
